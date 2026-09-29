@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>행복회로 버킷리스트</title>
+  <meta name="description" content="복권에 당첨됐다고 가정하고 버킷리스트를 비용과 함께 적어 보는 가상 시뮬레이터(1단계). 로또·스피또는 일시금 예산, 연금복권은 월별 현금흐름으로 계산합니다.">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#6b3fa0">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">본문으로 건너뛰기</a>
+  <header class="site-header">
+    <div class="inner header-inner">
+      <div class="brand">
+        <span class="brand-name">행복회로 버킷리스트</span>
+        <span class="brand-sub">복권에 당첨됐다면? — 가상 시뮬레이션</span>
+      </div>
+      <div class="scenario-bar">
+        <label class="sr" for="scenarioSel">시나리오</label>
+        <select id="scenarioSel" aria-label="시나리오 고르기"></select>
+        <button type="button" class="btn small" id="btnNew">새 시나리오</button>
+        <button type="button" class="btn small" id="btnCopy">복제</button>
+        <button type="button" class="btn small ghost" id="btnDelScenario">삭제</button>
+        <span id="saveState" class="save-state" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+  </header>
+
+  <div class="notice inner-wrap"><div class="inner">
+    <strong>가상 시뮬레이션입니다.</strong> 실제 계좌·당첨 결과·재무 조언이 아니며, 세금은 기획서 2장 산식으로 낸 원 단위 추정치입니다(복권 구입비 등 실제 원천징수와 차이가 있을 수 있어요). 금리·물가·투자 수익은 넣지 않습니다.
+  </div></div>
+
+  <main id="main" class="inner main" tabindex="-1">
+    <div class="layout">
+      <div class="col-edit">
+
+        <!-- 1. 당첨 내역 -->
+        <section class="panel" id="secWins" aria-labelledby="hWins">
+          <h2 id="hWins">1. 당첨 내역</h2>
+          <p class="hint">복권 종류와 등수를 골라 당첨 건을 추가해 주세요. 여러 복권·여러 등수를 한 시나리오에 함께 넣을 수 있어요.</p>
+          <div class="preset-row" id="presetRow"></div>
+          <div id="entryList"></div>
+          <div id="prizeTotals"></div>
+
+          <details class="form-box" id="entryBox" open>
+            <summary id="entryFormTitle">당첨 건 추가</summary>
+            <form id="entryForm" novalidate>
+              <div class="grid2">
+                <label>복권 종류<select id="eProduct"></select></label>
+                <label>등수<select id="eRank"></select></label>
+              </div>
+              <label id="eTitleWrap" hidden>이름(직접 설정)<input id="eTitle" type="text" maxlength="40" placeholder="예: 검증용 가정값"></label>
+              <div class="grid2">
+                <label>수량<input id="eQty" type="number" min="1" max="100" step="1" value="1" inputmode="numeric"><span class="err" id="eQtyErr"></span></label>
+                <label>금액 기준<select id="eMode"><option value="gross">세전 금액 입력</option><option value="net">세후 금액 직접 입력</option></select></label>
+              </div>
+              <label><span id="eAmountLabel">1건당 금액</span>
+                <input id="eAmount" type="text" inputmode="numeric" autocomplete="off" placeholder="예: 150만 · 2억 · 1,000,000">
+                <span class="help" id="eAmountHelp"></span><span class="err" id="eAmountErr"></span>
+              </label>
+              <p class="fact" id="eFact"></p>
+              <div class="grid2" id="ePayoutWrap" hidden>
+                <label>지급 방식<select id="ePayout"><option value="lump">일시금</option><option value="monthly">월 지급</option></select></label>
+              </div>
+              <div class="grid2">
+                <label id="eReceiptWrap">수령 월<input id="eReceipt" type="month"><span class="err" id="eReceiptErr"></span></label>
+                <label id="eFirstWrap" hidden>첫 지급 월<input id="eFirst" type="month"><span class="err" id="eFirstErr"></span></label>
+                <label id="eMonthsWrap" hidden>지급기간(개월)<input id="eMonths" type="number" min="1" max="600" step="1" inputmode="numeric"><span class="err" id="eMonthsErr"></span></label>
+              </div>
+              <details class="sub">
+                <summary>중복 입력 확인용 (선택)</summary>
+                <p class="hint">같은 복권의 같은 게임을 두 번 넣지 않게 막아 줍니다. 실물 번호·개인정보는 넣지 마시고, 알아볼 수 있는 별칭만 적어 주세요.</p>
+                <div class="grid3">
+                  <label>회차<input id="eRound" type="text" maxlength="12"></label>
+                  <label>복권 별칭<input id="eAlias" type="text" maxlength="20" placeholder="예: 지갑 속 한 장"></label>
+                  <label>게임 위치<input id="eGame" type="text" maxlength="8" placeholder="예: A"></label>
+                </div>
+              </details>
+              <div class="calc-line" id="eCalc" aria-live="polite"></div>
+              <div class="err" id="eFormErr"></div>
+              <div class="btn-row">
+                <button type="submit" class="btn primary" id="eSubmit">당첨 건 추가</button>
+                <button type="button" class="btn ghost" id="eCancel" hidden>수정 취소</button>
+              </div>
+            </form>
+          </details>
+        </section>
+
+        <!-- 2. 잔고와 안전금고 -->
+        <section class="panel" id="secCash" aria-labelledby="hCash">
+          <h2 id="hCash">2. 잔고와 안전금고</h2>
+          <div class="grid2">
+            <label>시나리오 이름<input id="sTitle" type="text" maxlength="40"></label>
+            <label>시작 월<input id="sStart" type="month"><span class="help">월별 계산의 첫 달이에요. 그 전에 받은 돈은 현재 잔고에 들어 있는 것으로 봅니다.</span></label>
+            <label>현재 잔고 (당첨 전 보유 현금)<input id="sCash" type="text" inputmode="numeric" autocomplete="off"><span class="help" id="sCashHelp"></span><span class="err" id="sCashErr"></span></label>
+            <label>안전금고 — 이 돈은 남겨둘래요<input id="sReserve" type="text" inputmode="numeric" autocomplete="off"><span class="help" id="sReserveHelp"></span><span class="err" id="sReserveErr"></span></label>
+          </div>
+          <label class="check"><input id="sForceMonthly" type="checkbox"> 일시금만 있어도 월별 현금흐름으로 보기</label>
+          <p class="hint">안전금고는 총잔액 안에 들어 있는 보호 금액이에요. 지출로 빼지 않고, 가용잔고 = 잔고 − 안전금고로만 계산합니다.</p>
+        </section>
+
+        <!-- 3. 버킷 -->
+        <section class="panel" id="secBuckets" aria-labelledby="hBuckets">
+          <h2 id="hBuckets">3. 버킷리스트</h2>
+          <div class="filter-row">
+            <label>카테고리<select id="fCat"></select></label>
+            <label>우선순위<select id="fPri"></select></label>
+            <label>정렬<select id="fSort"><option value="order">적은 순서</option><option value="amount">금액 큰 순</option><option value="month">지출 월 순</option></select></label>
+          </div>
+          <p class="hint">필터와 정렬은 목록 보기만 바꾸고 계산 합계는 바꾸지 않아요.</p>
+          <div id="bucketList"></div>
+          <div id="catTotals"></div>
+
+          <details class="form-box" id="bucketBox" open>
+            <summary id="bucketFormTitle">버킷 추가</summary>
+            <form id="bucketForm" novalidate>
+              <label>제목<input id="bTitle" type="text" maxlength="60" placeholder="예: 부모님 여행 보내드리기"><span class="err" id="bTitleErr"></span></label>
+              <label>예상 소요금액<input id="bAmount" type="text" inputmode="numeric" autocomplete="off" placeholder="예: 400만 · 1억 8천만"><span class="help" id="bAmountHelp"></span><span class="err" id="bAmountErr"></span></label>
+              <div class="grid2">
+                <label>지출 유형<select id="bKind"><option value="once">일시성 (한 번)</option><option value="monthly">반복성 (매월)</option></select></label>
+                <label id="bTargetWrap">지출 월<input id="bTarget" type="month"><span class="err" id="bTargetErr"></span></label>
+                <label id="bStartWrap" hidden>시작 월<input id="bStart" type="month"><span class="err" id="bStartErr"></span></label>
+                <label id="bEndWrap" hidden>종료 월<input id="bEnd" type="month"><span class="err" id="bEndErr"></span></label>
+              </div>
+              <div class="grid2">
+                <label>카테고리<select id="bCat"></select></label>
+                <label>우선순위<select id="bPri"></select></label>
+              </div>
+              <label>메모 (선택)<input id="bNote" type="text" maxlength="120"></label>
+              <p class="hint" id="bKindHint"></p>
+              <div class="btn-row">
+                <button type="submit" class="btn primary" id="bSubmit">버킷 추가</button>
+                <button type="button" class="btn ghost" id="bCancel" hidden>수정 취소</button>
+              </div>
+            </form>
+          </details>
+        </section>
+
+        <!-- 4. 고정지출·기타 수입 (월별) -->
+        <section class="panel" id="secFlows" aria-labelledby="hFlows">
+          <h2 id="hFlows">4. 고정지출과 기타 수입 <span class="tag">월별 계산</span></h2>
+          <p class="hint">월세·생활비·보험료 같은 고정지출과 급여 같은 수입을 적어 주세요. 같은 비용을 버킷에도 넣으면 두 번 빠지니 한쪽에만 적어 주세요.</p>
+          <div id="flowList"></div>
+          <form id="flowForm" class="form-box plain" novalidate>
+            <div class="grid2">
+              <label>구분<select id="fDir"><option value="out">고정지출</option><option value="in">기타 수입(세후)</option></select></label>
+              <label>제목<input id="fTitle" type="text" maxlength="40" placeholder="예: 생활비"></label>
+              <label>월 금액<input id="fAmount" type="text" inputmode="numeric" autocomplete="off" placeholder="예: 250만"><span class="help" id="fAmountHelp"></span></label>
+              <label>시작 월<input id="fStart" type="month"></label>
+              <label>종료 월 (비우면 계속)<input id="fEnd" type="month"></label>
+              <label class="check" id="fStopWrap" hidden><input id="fStop" type="checkbox"> 퇴사하면 멈춤</label>
+            </div>
+            <div class="err" id="fErr"></div>
+            <button type="submit" class="btn">추가</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="col-view">
+        <!-- 5. 결과 -->
+        <section class="panel result" id="secResult" aria-labelledby="hResult">
+          <h2 id="hResult">남은 예산</h2>
+          <div id="result"></div>
+        </section>
+
+        <!-- 6. 퇴사 -->
+        <section class="panel" id="secRetire" aria-labelledby="hRetire">
+          <h2 id="hRetire">몇 달을 살 수 있을까 (퇴사 가능 기간)</h2>
+          <div class="grid2">
+            <label id="rMonthWrap">퇴사 시작 월<input id="rMonth" type="month"></label>
+            <label>퇴사 후 월 생활비<input id="rLiving" type="text" inputmode="numeric" autocomplete="off" placeholder="예: 300만"><span class="help" id="rLivingHelp"></span></label>
+          </div>
+          <div id="retireOut" aria-live="polite"></div>
+        </section>
+
+        <!-- 7. 미래 현금흐름 -->
+        <section class="panel" id="secFuture" aria-labelledby="hFuture">
+          <h2 id="hFuture">미래 현금흐름</h2>
+          <div id="future"></div>
+        </section>
+
+        <!-- 8. 저장·공유 -->
+        <section class="panel" id="secShare" aria-labelledby="hShare">
+          <h2 id="hShare">저장과 공유</h2>
+          <p class="hint">입력할 때마다 이 브라우저에 자동 저장돼요(계정 없음). 다른 기기로 옮기거나 백업하려면 JSON 으로 내보내 주세요.</p>
+          <div class="btn-row">
+            <button type="button" class="btn" id="btnExport">JSON 내보내기</button>
+            <label class="btn file-btn">JSON 가져오기<input type="file" id="importFile" accept=".json,application/json"></label>
+            <button type="button" class="btn ghost" id="btnReset">모든 시나리오 지우기</button>
+          </div>
+          <div class="err" id="importErr"></div>
+          <h3>공유 이미지</h3>
+          <p class="hint">공개할 항목을 골라 미리보기를 확인한 뒤 내려받아 주세요. 현재 잔고와 메모는 기본으로 숨겨요.</p>
+          <div class="share-opts" id="shareOpts">
+            <label class="check"><input type="checkbox" data-share="wins" checked> 당첨 구성·세후 수령액</label>
+            <label class="check"><input type="checkbox" data-share="buckets" checked> 버킷 목록</label>
+            <label class="check"><input type="checkbox" data-share="result" checked> 남은 예산 / 선택 월 결과</label>
+            <label class="check"><input type="checkbox" data-share="cash"> 현재 잔고</label>
+            <label class="check"><input type="checkbox" data-share="memo"> 버킷 메모</label>
+          </div>
+          <canvas id="shareCanvas" class="share-canvas" width="1080" height="1350" aria-label="공유 이미지 미리보기"></canvas>
+          <div class="btn-row">
+            <button type="button" class="btn primary" id="btnShareSave">이미지 내려받기</button>
+            <button type="button" class="btn" id="btnPrint">인쇄 / PDF</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="inner">1단계 · 가상 시뮬레이션(재무 조언 아님) · 상품 초기값은 수강생 기획서 v1.1 기준 값(확인일 2026-09-29)이며 고쳐 쓸 수 있어요 · 로또 평균 자동 수집·공유 링크·계정 동기화는 2단계</div>
+  </footer>
+
+  <button type="button" class="fab" id="fabBucket">버킷 추가</button>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="js/logic.js"></script>
+  <script src="js/examples.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
