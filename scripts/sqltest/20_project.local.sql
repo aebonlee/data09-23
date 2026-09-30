@@ -210,6 +210,10 @@ begin
     '23514', '버킷 제목은 비워 둘 수 없다');
   perform public._assert_raises($s$insert into public.cashflow (scenario_id, cashflow_id, direction, title, amount, start_month, end_month) values ('s-a1', 'f-2', 'out', '보험', 100000, '2027-01', '2026-12')$s$,
     '23514', '고정지출 종료 월 역전은 막는다');
+  perform public._assert_raises($s$insert into public.cashflow (scenario_id, cashflow_id, direction, title, amount, start_month, expected) values ('s-a1', 'f-x1', 'in', '추가 예상 수입', 100000, '2026-10', true)$s$,
+    '23514', '추가 예상 수입은 종료 월이 꼭 있다');
+  perform public._assert_raises($s$insert into public.cashflow (scenario_id, cashflow_id, direction, title, amount, start_month, end_month, expected) values ('s-a1', 'f-x2', 'out', '추가 예상 수입', 100000, '2026-10', '2027-03', true)$s$,
+    '23514', '추가 예상 수입은 수입(in)이어야 한다');
   perform public._assert_raises($s$update public.scenario set reserve_amount = -1$s$,
     '23514', '안전금고는 0 이상이다');
   perform public._assert_raises($s$insert into public.bucket (scenario_id, bucket_id, title, amount, kind, target_month) values ('s-none', 'k-9', 'x', 1, 'once', '2026-10')$s$,

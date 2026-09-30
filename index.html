@@ -80,6 +80,14 @@
   </div></div>
 
   <main id="main" class="inner main" tabindex="-1">
+    <!-- 2026-09-30: 공유 링크로 들어왔을 때 -->
+    <div class="share-inbox" id="shareInbox" role="region" aria-label="공유받은 시나리오" hidden>
+      <p id="shareInboxText"></p>
+      <div class="btn-row">
+        <button type="button" class="btn primary small" id="shareInboxAdd">내 목록에 추가해서 보기</button>
+        <button type="button" class="btn ghost small" id="shareInboxClose">닫기</button>
+      </div>
+    </div>
     <div class="layout">
       <div class="col-edit">
 
@@ -108,6 +116,15 @@
                 <span class="help" id="eAmountHelp"></span><span class="err" id="eAmountErr"></span>
               </label>
               <p class="fact" id="eFact"></p>
+              <!-- 2026-09-30: 로또 1~3등 평균 — 자동 수집 자료(data/lotto.json)가 없을 때 쓰는 직접 입력 보조 -->
+              <details class="sub" id="eAvgBox" hidden>
+                <summary>회차별 금액으로 평균 내기 (직접 입력)</summary>
+                <p class="hint">동행복권 당첨결과 화면에서 본 1게임당 당첨금을 회차마다 한 줄씩(또는 쉼표로 나눠) 붙여 넣어 주세요. 위에서부터 52회차까지 평균을 냅니다. 당첨자가 없던 회차는 빼 주세요.</p>
+                <label class="sr" for="eAvgList">회차별 1게임당 당첨금</label>
+                <textarea id="eAvgList" rows="4" placeholder="예: 25억 3천만&#10;18억 2,000만&#10;2,145,678,900"></textarea>
+                <p class="help" id="eAvgOut" aria-live="polite"></p>
+                <button type="button" class="btn small" id="eAvgApply" disabled>이 평균으로 채우기</button>
+              </details>
               <div class="grid2" id="ePayoutWrap" hidden>
                 <label>지급 방식<select id="ePayout"><option value="lump">일시금</option><option value="monthly">월 지급</option></select></label>
               </div>
@@ -144,6 +161,7 @@
             <label>현재 잔고 (당첨 전 보유 현금)<input id="sCash" type="text" inputmode="numeric" autocomplete="off"><span class="help" id="sCashHelp"></span><span class="err" id="sCashErr"></span></label>
             <label>안전금고 — 이 돈은 남겨둘래요<input id="sReserve" type="text" inputmode="numeric" autocomplete="off"><span class="help" id="sReserveHelp"></span><span class="err" id="sReserveErr"></span></label>
           </div>
+          <p class="hint" id="sReserveLimit" aria-live="polite"></p>
           <label class="check"><input id="sForceMonthly" type="checkbox"> 일시금만 있어도 월별 현금흐름으로 보기</label>
           <p class="hint">안전금고는 총잔액 안에 들어 있는 보호 금액이에요. 지출로 빼지 않고, 가용잔고 = 잔고 − 안전금고로만 계산합니다.</p>
         </section>
@@ -189,14 +207,15 @@
         <section class="panel" id="secFlows" aria-labelledby="hFlows">
           <div class="section-kicker">STEP 04 · CASH FLOW</div><h2 id="hFlows">4. 고정지출과 기타 수입 <span class="tag">월별 계산</span></h2>
           <p class="hint">월세·생활비·보험료 같은 고정지출과 급여 같은 수입을 적어 주세요. 같은 비용을 버킷에도 넣으면 두 번 빠지니 한쪽에만 적어 주세요.</p>
+          <p class="hint">「추가 예상 수입」은 부업·퇴직금 분할처럼 기간이 정해진 수입이에요. 이름은 비워도 되고, 기간(시작·종료 월)을 넣으면 그 기간 월별 예산에 더해지고 안전금고 한도에도 들어갑니다.</p>
           <div id="flowList"></div>
           <form id="flowForm" class="form-box plain" novalidate>
             <div class="grid2">
-              <label>구분<select id="fDir"><option value="out">고정지출</option><option value="in">기타 수입(세후)</option></select></label>
-              <label>제목<input id="fTitle" type="text" maxlength="40" placeholder="예: 생활비"></label>
+              <label>구분<select id="fDir"><option value="out">고정지출</option><option value="in">기타 수입(세후)</option><option value="expected">추가 예상 수입(세후 · 기간 지정)</option></select></label>
+              <label><span id="fTitleLabel">제목</span><input id="fTitle" type="text" maxlength="40" placeholder="예: 생활비"></label>
               <label>월 금액<input id="fAmount" type="text" inputmode="numeric" autocomplete="off" placeholder="예: 250만"><span class="help" id="fAmountHelp"></span></label>
               <label>시작 월<input id="fStart" type="month"></label>
-              <label>종료 월 (비우면 계속)<input id="fEnd" type="month"></label>
+              <label><span id="fEndLabel">종료 월 (비우면 계속)</span><input id="fEnd" type="month"></label>
               <label class="check" id="fStopWrap" hidden><input id="fStop" type="checkbox"> 퇴사하면 멈춤</label>
             </div>
             <div class="err" id="fErr"></div>
@@ -225,6 +244,17 @@
         <!-- 7. 미래 현금흐름 -->
         <section class="panel" id="secFuture" aria-labelledby="hFuture">
           <h2 id="hFuture">미래 현금흐름</h2>
+          <!-- 2026-09-30: 그래프·표를 원하는 기간으로 보기 -->
+          <div class="range-row" id="chartRangeRow" hidden>
+            <label>보기 시작 월<input id="cFrom" type="month"></label>
+            <label>보기 끝 월<input id="cTo" type="month"></label>
+            <div class="btn-row range-quick">
+              <button type="button" class="btn small" data-range="12">1년</button>
+              <button type="button" class="btn small" data-range="36">3년</button>
+              <button type="button" class="btn small" data-range="120">10년</button>
+              <button type="button" class="btn small ghost" data-range="0">기본 기간</button>
+            </div>
+          </div>
           <div id="future"></div>
         </section>
 
@@ -252,13 +282,23 @@
             <button type="button" class="btn primary" id="btnShareSave">이미지 내려받기</button>
             <button type="button" class="btn" id="btnPrint">인쇄 / PDF</button>
           </div>
+          <!-- 2026-09-30: 공유 링크 — 서버 없이 시나리오를 주소 뒤(#share=)에 담습니다 -->
+          <h3>공유 링크</h3>
+          <p class="hint">링크를 받은 사람이 열면 이 시나리오를 자기 브라우저에 복사해 볼 수 있어요. 시나리오 내용이 주소 안에 들어 있어 서버에 저장되지 않고, 한 번 보낸 링크는 되돌릴 수 없어요. 위에서 「현재 잔고」를 고르지 않으면 잔고·안전금고는 0원, 「버킷 메모」를 고르지 않으면 메모는 빈칸으로 담습니다. 회차·복권 별칭은 늘 뺍니다.</p>
+          <div class="btn-row">
+            <button type="button" class="btn" id="btnShareLink">공유 링크 만들기</button>
+            <button type="button" class="btn small" id="btnShareCopy" hidden>링크 복사</button>
+          </div>
+          <label class="sr" for="shareLink">공유 링크</label>
+          <input id="shareLink" class="share-link" type="text" readonly hidden>
+          <p class="help" id="shareLinkMsg" aria-live="polite"></p>
         </section>
       </div>
     </div>
   </main>
 
   <footer class="site-footer">
-    <div class="inner footer-inner"><span class="footer-brand"><img src="assets/logo.svg" alt="" width="28" height="28">행복회로</span><span>1단계 · 가상 시뮬레이션(재무 조언 아님) · 상품 초기값은 수강생 기획서 v1.1 기준 값(확인일 2026-09-29)이며 고쳐 쓸 수 있어요 · 로또 평균 자동 수집·공유 링크·계정 동기화는 2단계</span><a href="#top">맨 위로 ↑</a></div>
+    <div class="inner footer-inner"><span class="footer-brand"><img src="assets/logo.svg" alt="" width="28" height="28">행복회로</span><span>1단계 · 가상 시뮬레이션(재무 조언 아님) · 상품 초기값은 수강생 기획서 v1.1 기준 값(확인일 2026-09-29)이며 고쳐 쓸 수 있어요 · 로또 평균은 수집 자료가 있으면 자동으로, 없으면 직접 입력 · 계정 동기화는 2단계</span><a href="#top">맨 위로 ↑</a></div>
   </footer>
 
   <button type="button" class="fab" id="fabBucket">버킷 추가</button>

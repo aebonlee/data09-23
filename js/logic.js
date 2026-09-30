@@ -238,9 +238,11 @@
     var err = {};
     if (!str(f.title)) err.title = '제목을 넣어 주세요';
     if (f.direction !== 'in' && f.direction !== 'out') err.direction = '수입/지출을 골라 주세요';
+    else if (f.expected && f.direction !== 'in') err.direction = '추가 예상 수입은 수입이어야 해요';
     if (!(isInt(f.amount) && f.amount >= 1 && f.amount <= LIMITS.amountMax)) err.amount = '월 금액은 1원 이상 정수로 넣어 주세요';
     if (!isMonth(f.startMonth)) err.startMonth = '시작 월을 골라 주세요';
-    if (f.endMonth && !isMonth(f.endMonth)) err.endMonth = '종료 월 형식이 달라요';
+    if (f.expected && !f.endMonth) err.endMonth = '추가 예상 수입은 기간(종료 월)이 꼭 필요해요';
+    else if (f.endMonth && !isMonth(f.endMonth)) err.endMonth = '종료 월 형식이 달라요';
     else if (f.endMonth && isMonth(f.startMonth) && monthIndex(f.endMonth) < monthIndex(f.startMonth)) err.endMonth = '종료 월이 시작 월보다 빨라요';
     return err;
   }
@@ -282,6 +284,7 @@
   // 월별 모드인가 — 월 지급이 하나라도 있거나 일시금 수령 월이 다르면(1장·2B), 또는 사용자가 월별 보기를 고르면
   function isMonthlyMode(s) {
     if (s.forceMonthly) return true;
+    if (expectedIncomes(s).length) return true;   // 추가 예상 수입은 그 기간 예산에 들어가야 하므로 월별로 봅니다(2026-09-30)
     var es = activeEntries(s), months = {};
     for (var i = 0; i < es.length; i++) {
       if (es[i].payoutType === 'monthly') return true;
@@ -469,11 +472,116 @@
   }
 
   // 로또 평균값(2장) — G = round(ΣPᵣ / N), N ≤ 52, 당첨자 없음·누락 회차 제외.
-  // 1단계는 자동 수집을 하지 않습니다(2단계 서버 작업). 식만 준비해 둡니다.
   function lottoAverage(values) {
     var v = (values || []).filter(function (x) { return isInt(x) && x > 0; }).slice(-52);
     if (!v.length) return null;
     return { mean: Math.round(v.reduce(function (a, b) { return a + b; }, 0) / v.length), n: v.length };
+  }
+  // 직접 입력 보조 — 「25억 3천만, 18억」이나 줄마다 적은 금액 목록을 원 정수 배열로.
+  // 알아볼 수 없는 칸은 bad 로 돌려 화면에 알립니다.
+  function parseAmountList(text) {
+    var parts = str(text).split(/[\n;\/]+|,(?!\d{3})/), vals = [], bad = [];
+    parts.forEach(function (p) { p = str(p); if (!p) return; var v = parseKrw(p); if (v == null || v <= 0) bad.push(p); else vals.push(v); });
+    return { values: vals, bad: bad };
+  }
+
+  // 로또 회차 자료(data/lotto.json) — 자동 수집 또는 관리자 등록 결과를 담는 파일 형식.
+  //   { schema: 'lotto-draws@1', source, updatedAt: 'YYYY-MM-DD', draws: [
+  //       { round: 1190, date: 'YYYY-MM-DD', ranks: { '1': { perGame, winners }, '2': {…}, '3': {…} } } ] }
+  // perGame 은 1게임당 세전 당첨금(원). 당첨자 0명이거나 금액이 없는 회차는 평균에서 뺍니다(2장).
+  function checkLottoData(o) {
+    var errs = [];
+    if (!o || typeof o !== 'object') return ['자료 형식이 아니에요'];
+    if (o.schema !== 'lotto-draws@1') errs.push('schema 가 lotto-draws@1 이 아니에요');
+    if (!Array.isArray(o.draws)) { errs.push('draws 목록이 없어요'); return errs; }
+    var seen = {};
+    o.draws.forEach(function (d, i) {
+      var at = (i + 1) + '번째 회차';
+      if (!d || !(isInt(d.round) && d.round > 0)) { errs.push(at + ': 회차 번호가 없어요'); return; }
+      if (seen[d.round]) errs.push(d.round + '회: 두 번 들어 있어요'); seen[d.round] = 1;
+      if (!d.ranks || typeof d.ranks !== 'object') { errs.push(d.round + '회: ranks 가 없어요'); return; }
+      ['1', '2', '3'].forEach(function (k) {
+        var r = d.ranks[k]; if (r == null) return;
+        if (!(isInt(r.perGame) && r.perGame >= 0 && r.perGame <= LIMITS.amountMax)) errs.push(d.round + '회 ' + k + '등: 금액은 0 이상 정수여야 해요');
+        if (r.winners != null && !(isInt(r.winners) && r.winners >= 0)) errs.push(d.round + '회 ' + k + '등: 당첨자 수 형식이 달라요');
+      });
+    });
+    return errs;
+  }
+  // 최근 52회차의 1~3등 평균. 자료가 없거나 형식이 틀리면 null → 화면은 직접 입력으로 돌아갑니다.
+  function lottoAverages(o) {
+    if (checkLottoData(o).length) return null;
+    var draws = o.draws.slice().sort(function (a, b) { return a.round - b.round; }).slice(-52);
+    if (!draws.length) return null;
+    var out = { from: draws[0].round, to: draws[draws.length - 1].round, draws: draws.length, updatedAt: str(o.updatedAt), source: str(o.source), ranks: {} };
+    ['1', '2', '3'].forEach(function (k) {
+      var vals = [];
+      draws.forEach(function (d) { var r = d.ranks[k]; if (r && r.perGame > 0 && r.winners !== 0) vals.push(r.perGame); });
+      out.ranks[k] = lottoAverage(vals);   // { mean, n } 또는 null
+    });
+    return (out.ranks['1'] || out.ranks['2'] || out.ranks['3']) ? out : null;
+  }
+
+  // ── 추가 예상 수입(2026-09-30 수강생 답) ─────────────────────
+  // 기간이 정해진 수입(퇴직금 분할·부업·임대 등). 그 기간 월별 예산에 수입으로 들어가고,
+  // 안전금고 한도에도 더합니다. 제목은 생략할 수 있어 비우면 기본 이름을 씁니다.
+  var EXPECTED_TITLE = '추가 예상 수입';
+  function expectedIncomes(s) { return (s.flows || []).filter(function (f) { return f.expected && ok(validFlow(f)); }); }
+  // 시작 월 이후 기간에 들어오는 금액 합계(시작 월 전 몫은 현재 잔고에 들어 있는 것으로 봄)
+  function expectedIncomeTotal(s) {
+    var M0 = monthIndex(s.startMonth);
+    return expectedIncomes(s).reduce(function (sum, f) {
+      var a = Math.max(monthIndex(f.startMonth), M0), b = Math.min(monthIndex(f.endMonth), M0 + LIMIT_MONTHS - 1);
+      return b < a ? sum : safe(sum + f.amount * (b - a + 1));
+    }, 0);
+  }
+
+  // ── 그래프·표 조회 기간(2026-09-30) ─────────────────────────
+  // 사용자가 고른 시작·끝 월을 계산 범위(시작 월 ~ 600개월) 안으로 맞춥니다. 비우면 기본 조회 범위.
+  function chartRange(s, from, to) {
+    var v = viewRange(s), lo = monthIndex(s.startMonth), hi = lo + LIMIT_MONTHS - 1;
+    var a = isMonth(from) ? monthIndex(from) : lo, b = isMonth(to) ? monthIndex(to) : monthIndex(v.end);
+    if (a > b) { var t = a; a = b; b = t; }
+    a = Math.min(Math.max(a, lo), hi); b = Math.min(Math.max(b, lo), hi);
+    return { start: monthFromIndex(a), end: monthFromIndex(b), from: a - lo, to: b - lo, months: b - a + 1, custom: isMonth(from) || isMonth(to) };
+  }
+
+  // ── 공유 링크(2026-09-30) ─────────────────────────────────
+  // 서버 없이 시나리오를 주소 뒤(#share=…)에 담습니다. 주소의 # 뒤는 서버로 보내지지 않아요.
+  // 현재 잔고·메모는 고른 경우에만 담고, 회차·복권 별칭·게임 위치는 늘 뺍니다.
+  function shareSanitize(s, opts) {
+    opts = opts || {};
+    var c = clone(s);
+    delete c.createdAt; delete c.updatedAt;
+    if (!opts.cash) { c.currentCash = 0; c.reserveAmount = 0; }
+    c.entries.forEach(function (e) { e.round = ''; e.alias = ''; e.game = ''; });
+    if (!opts.memo) c.buckets.forEach(function (b) { b.note = ''; });
+    return c;
+  }
+  function b64urlEncode(text) {
+    var bytes = new TextEncoder().encode(text), bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64urlDecode(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '=';
+    var bin = atob(s), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  function encodeShare(s, opts) {
+    return 'share=' + b64urlEncode(JSON.stringify({ app: 'data09-23', v: 1, scenario: shareSanitize(s, opts) }));
+  }
+  // 주소의 # 부분을 받아 { scenario } 또는 { error } 를 돌려줍니다. 공유 링크가 아니면 null.
+  function decodeShare(hash) {
+    var m = /(?:^|[#&])share=([A-Za-z0-9_-]+)/.exec(hash || '');
+    if (!m) return null;
+    var o;
+    try { o = JSON.parse(b64urlDecode(m[1])); } catch (e) { return { error: '공유 링크가 잘렸거나 손상됐어요' }; }
+    if (!o || o.app !== 'data09-23' || o.v !== 1) return { error: '행복회로 공유 링크가 아니에요' };
+    var errs = checkScenario(o.scenario);
+    if (errs.length) return { error: '공유된 시나리오를 읽지 못했어요 — ' + errs.slice(0, 2).join(', ') };
+    return { scenario: o.scenario };
   }
 
   // ── 저장·가져오기 검증(8장) ────────────────────────────────
@@ -498,11 +606,14 @@
     return errs.filter(function (x, i, a) { return a.indexOf(x) === i; });
   }
   // 안전금고 설정 한도(3장) — 초기 사용 가능 현금을 넘길 수 없음.
-  // 일시금 모드 = 당첨 후 잔고, 월별 모드 = 현재 잔고 + 시작 월 당첨 수령액
-  function reserveLimit(s) {
-    if (!isMonthlyMode(s)) return lumpSummary(s).afterWin;
-    return s.currentCash + simulate(s).rows[0].prizeIncome;
+  // 일시금 모드 = 당첨 후 잔고
+  // 월별 모드 = 현재 잔고 + 시작 월 당첨 수령액 + 추가 예상 수입(기간 합계) — 2026-09-30 수강생 답으로 확정
+  function reserveLimitParts(s) {
+    if (!isMonthlyMode(s)) { var a = lumpSummary(s).afterWin; return { mode: 'lump', total: a, afterWin: a }; }
+    var cash = s.currentCash, first = simulate(s).rows[0].prizeIncome, extra = expectedIncomeTotal(s);
+    return { mode: 'monthly', total: safe(cash + first + extra), cash: cash, firstMonthPrize: first, expected: extra };
   }
+  function reserveLimit(s) { return reserveLimitParts(s).total; }
 
   var API = {
     SCHEMA_VERSION: SCHEMA_VERSION, CHECKED_ON: CHECKED_ON, LIMIT_MONTHS: LIMIT_MONTHS, LIMITS: LIMITS,
@@ -519,7 +630,10 @@
     lumpSummary: lumpSummary, simulate: simulate, finalPrizeMonth: finalPrizeMonth, viewRange: viewRange,
     paymentStatus: paymentStatus, warningOf: warningOf, lumpWarning: lumpWarning, firstMonth: firstMonth,
     retireMonths: retireMonths, summarize: summarize, giveUpPreview: giveUpPreview, clone: clone,
-    lottoAverage: lottoAverage, checkScenario: checkScenario, reserveLimit: reserveLimit
+    lottoAverage: lottoAverage, parseAmountList: parseAmountList, checkLottoData: checkLottoData, lottoAverages: lottoAverages,
+    EXPECTED_TITLE: EXPECTED_TITLE, expectedIncomes: expectedIncomes, expectedIncomeTotal: expectedIncomeTotal,
+    chartRange: chartRange, shareSanitize: shareSanitize, encodeShare: encodeShare, decodeShare: decodeShare,
+    checkScenario: checkScenario, reserveLimit: reserveLimit, reserveLimitParts: reserveLimitParts
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else root.HCLogic = API;

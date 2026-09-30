@@ -10,7 +10,9 @@
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var money = function (n) { return '<span class="kor">' + esc(L.korWon(n)) + '</span> <span class="exact">' + esc(L.won(n)) + '</span>'; };
 
-  var db, ui = { selMonth: null, editEntryId: null, editBucketId: null, showAll: false, preview: null, undo: null };
+  var db, ui = { selMonth: null, editEntryId: null, editBucketId: null, showAll: false, preview: null, undo: null,
+    lotto: null, lottoState: 'loading', avgValue: null, shared: null };
+  var ONLINE_URL = 'https://aebonlee.github.io/data09-23/';
 
   // ── 저장 ──────────────────────────────────────────────────
   function cur() {
@@ -63,7 +65,10 @@
     $('eTitleWrap').hidden = p.id !== 'custom';
     $('ePayoutWrap').hidden = r.payout !== 'either';
     if (r.payout !== 'either') $('ePayout').value = r.payout;
-    if (r.gross != null) setMoney('eAmount', 'eAmountHelp', r.gross); else setMoney('eAmount', 'eAmountHelp', null);
+    var avg = r.avg && ui.lotto && ui.lotto.ranks[r.code];
+    if (r.gross != null) setMoney('eAmount', 'eAmountHelp', r.gross);
+    else if (avg) setMoney('eAmount', 'eAmountHelp', avg.mean);   // 수집 자료가 있으면 평균으로 채움(새 행일 때만)
+    else setMoney('eAmount', 'eAmountHelp', null);
     $('eMode').value = 'gross';
     $('eMonths').value = r.months || ($('ePayout').value === 'monthly' ? 12 : '');
     if (!$('eReceipt').value) $('eReceipt').value = s.startMonth;
@@ -71,7 +76,12 @@
     syncEntryForm();
   }
   function factText(p, r) {
-    if (r.avg) return '로또 1~3등의 최근 52회차 평균값 자동 수집은 2단계예요. 지금은 1게임당 금액을 직접 넣어 주세요. 넣은 금액은 실제 평균이 아니라 가정값으로 다룹니다.';
+    if (r.avg) {
+      var a = ui.lotto && ui.lotto.ranks[r.code];
+      if (a) return '수집 자료 기준 최근 ' + a.n + '회차(' + ui.lotto.from + '~' + ui.lotto.to + '회' + (ui.lotto.updatedAt ? ', 갱신 ' + ui.lotto.updatedAt : '') + ') 1게임당 평균 ' + L.korWon(a.mean) + '. 새 행에 자동으로 채웠어요. 고쳐 쓴 금액은 그대로 둡니다.';
+      return (ui.lottoState === 'loading' ? '평균 자료를 읽는 중이에요. ' : '자동 수집한 평균 자료가 아직 없어요' + (ui.lottoState === 'file' ? '(파일로 열면 자료를 읽지 못해요)' : '') + '. ') +
+        '1게임당 금액을 직접 넣거나, 아래 「회차별 금액으로 평균 내기」에 회차별 금액을 붙여 넣어 주세요. 넣은 금액은 가정값으로 다룹니다.';
+    }
     if (r.gross == null) return '기획서에 이 등수의 금액이 없어 직접 넣어 주세요. 가정 시나리오로 계산합니다.';
     var t = '기획서 기준 값 · 확인일 ' + L.CHECKED_ON + ': 1' + p.unit + '당 세전 ' + (r.payout === 'monthly' ? '월 ' : '') + L.korWon(r.gross);
     if (r.payout === 'monthly') t += ', ' + r.months + '개월 월 지급';
@@ -97,6 +107,7 @@
     $('eReceiptWrap').hidden = monthly; $('eFirstWrap').hidden = !monthly; $('eMonthsWrap').hidden = !monthly;
     $('eAmountLabel').textContent = '1' + p.unit + '당 ' + ($('eMode').value === 'net' ? '세후' : '세전') + (monthly ? ' 월 지급액' : ' 금액');
     $('eFact').textContent = factText(p, r);
+    $('eAvgBox').hidden = !r.avg;
     var e = readEntryForm(), err = L.validateEntry(e);
     setErr('eQtyErr', err.quantity); setErr('eAmountErr', $('eAmount').value.trim() ? err.unitAmount : '');
     setErr('eReceiptErr', err.receiptMonth); setErr('eFirstErr', err.firstPaymentMonth); setErr('eMonthsErr', err.paymentMonths);
@@ -114,6 +125,15 @@
     $('eQty').value = 1; $('eTitle').value = ''; $('eRound').value = ''; $('eAlias').value = ''; $('eGame').value = '';
     $('eReceipt').value = cur().startMonth; $('eFirst').value = cur().startMonth; setErr('eFormErr', '');
     applyRankDefaults();
+  }
+  // 직접 입력 보조 — 회차별 금액 목록의 평균(위에서부터 52개)
+  function syncAvgBox() {
+    var parsed = L.parseAmountList($('eAvgList').value), vals = parsed.values.slice(0, 52), a = L.lottoAverage(vals);
+    ui.avgValue = a ? a.mean : null;
+    $('eAvgApply').disabled = !a;
+    $('eAvgOut').className = 'help' + (parsed.bad.length ? ' bad' : '');
+    $('eAvgOut').textContent = (a ? a.n + '회차 평균 ' + L.won(a.mean) + ' (' + L.korWon(a.mean) + ')' + (parsed.values.length > 52 ? ' — 52개가 넘어 위의 52개만 썼어요' : '') : '') +
+      (parsed.bad.length ? (a ? ' · ' : '') + '읽지 못한 칸 ' + parsed.bad.length + '개(' + parsed.bad.slice(0, 3).join(', ') + ')는 뺐어요' : '');
   }
   function editEntry(id) {
     var e = cur().entries.find(function (x) { return x.id === id; }); if (!e) return;
@@ -222,7 +242,7 @@
   function render() {
     var s = cur(), monthly = L.isMonthlyMode(s);
     $('scenarioSel').innerHTML = db.scenarios.map(function (x) { return '<option value="' + esc(x.id) + '"' + (x.id === s.id ? ' selected' : '') + '>' + esc(x.title) + '</option>'; }).join('');
-    renderEntries(s); renderBuckets(s, monthly); renderFlows(s, monthly);
+    renderEntries(s); renderBuckets(s, monthly); renderFlows(s, monthly); renderReserveLimit(s);
     renderResult(s, monthly); renderRetire(s, monthly); renderFuture(s, monthly); drawShare();
     syncBucketForm();
   }
@@ -308,16 +328,35 @@
       '<button type="button" class="btn small" data-preview-cancel="1">취소</button></div><p class="small">적용하기 전에는 원래 계획이 그대로예요.</p></div>';
   }
 
+  function syncFlowForm() {
+    var d = $('fDir').value;
+    $('fStopWrap').hidden = d !== 'in';
+    $('fTitleLabel').textContent = d === 'expected' ? '항목 이름 (생략 가능)' : '제목';
+    $('fTitle').placeholder = d === 'expected' ? '예: 부업 수입 (비우면 「' + L.EXPECTED_TITLE + '」)' : d === 'in' ? '예: 급여' : '예: 생활비';
+    $('fEndLabel').textContent = d === 'expected' ? '종료 월 (예상 기간 끝, 필수)' : '종료 월 (비우면 계속)';
+  }
   function renderFlows(s, monthly) {
-    $('fStopWrap').hidden = $('fDir').value !== 'in';
+    syncFlowForm();
     var note = monthly ? '' : '<p class="note">지금은 일시금 화면이라 계산에 들어가지 않아요. 「월별로 보기」를 켜거나 연금 당첨을 넣으면 반영돼요.</p>';
     $('flowList').innerHTML = note + (s.flows.length ? '<ul class="rows">' + s.flows.map(function (f) {
-      return '<li class="row"><div class="row-head"><strong>' + esc(f.title) + '</strong><span class="chip">' + (f.direction === 'in' ? '수입' : '고정지출') + '</span>' + (f.stopOnRetirement ? '<span class="chip">퇴사하면 멈춤</span>' : '') + '</div>' +
+      var span = f.expected && L.isMonth(f.startMonth) && L.isMonth(f.endMonth) ? L.monthDiff(f.startMonth, f.endMonth) + 1 : 0;
+      return '<li class="row"><div class="row-head"><strong>' + esc(f.title) + '</strong><span class="chip">' + (f.expected ? '추가 예상 수입' : f.direction === 'in' ? '수입' : '고정지출') + '</span>' + (f.stopOnRetirement ? '<span class="chip">퇴사하면 멈춤</span>' : '') + '</div>' +
         '<p>월 ' + money(f.amount) + ' · ' + esc(L.monthLabel(f.startMonth)) + '~' + (f.endMonth ? esc(L.monthLabel(f.endMonth)) : '계속') + '</p>' +
+        (span ? '<p class="small">기간 ' + span + '개월 · 합계 ' + esc(L.korWon(f.amount * span)) + ' — 그 기간 월별 예산과 안전금고 한도에 들어가요</p>' : '') +
         '<div class="btn-row"><button type="button" class="btn small ghost" data-flow-del="' + esc(f.id) + '">삭제</button></div></li>';
     }).join('') + '</ul>' : '');
   }
 
+  // 안전금고 한도 풀이 — 월별 = 현재 잔고 + 시작 월 수령액 + 추가 예상 수입(2026-09-30 확정)
+  function renderReserveLimit(s) {
+    var p = L.reserveLimitParts(s);
+    var t = p.mode === 'lump'
+      ? '설정 한도 ' + L.korWon(p.total) + ' = 당첨 후 잔고'
+      : '설정 한도 ' + L.korWon(p.total) + ' = 현재 잔고 ' + L.korWon(p.cash) + ' + ' + L.monthLabel(s.startMonth) + ' 당첨 수령 ' + L.korWon(p.firstMonthPrize) + ' + 추가 예상 수입 ' + L.korWon(p.expected);
+    if (s.reserveAmount > p.total) t += ' — 지금 안전금고가 한도보다 커요. 줄여 주세요.';
+    $('sReserveLimit').textContent = t;
+    $('sReserveLimit').className = 'hint' + (s.reserveAmount > p.total ? ' bad' : '');
+  }
   function card(label, n, cls, sub) {
     return '<div class="card ' + (cls || '') + '"><span class="card-label">' + esc(label) + '</span><span class="card-num">' + esc(L.korWon(n)) + '</span><span class="exact">' + esc(L.won(n)) + (sub ? ' · ' + esc(sub) : '') + '</span></div>';
   }
@@ -385,8 +424,13 @@
   // 누적 잔액 그래프 + 표(같은 내용). 첫 부족 월과 연금 종료 월을 표시합니다.
   function renderFuture(s, monthly) {
     var box = $('future');
+    $('chartRangeRow').hidden = !monthly;
     if (!monthly) { box.innerHTML = '<p class="note">월별 현금흐름은 연금 당첨이 있거나 일시금 수령 월이 다를 때, 또는 「일시금만 있어도 월별 현금흐름으로 보기」를 켜면 보여요.</p>'; return; }
-    var sim = L.simulate(s), v = L.viewRange(s), rows = sim.rows.slice(0, v.months);
+    var sim = L.simulate(s), v = L.chartRange(s, s.chartFrom, s.chartTo), rows = sim.rows.slice(v.from, v.to + 1);
+    var maxM = L.addMonths(s.startMonth, L.LIMIT_MONTHS - 1);
+    [$('cFrom'), $('cTo')].forEach(function (el) { el.min = s.startMonth; el.max = maxM; });
+    if (document.activeElement !== $('cFrom')) $('cFrom').value = v.start;
+    if (document.activeElement !== $('cTo')) $('cTo').value = v.end;
     var ends = {};
     L.activeEntries(s).forEach(function (e) { if (e.payoutType === 'monthly') ends[L.addMonths(e.firstPaymentMonth, e.paymentMonths - 1)] = 1; });
     var firstShort = L.firstMonth(rows, function (r) { return r.closing < 0; });
@@ -399,7 +443,7 @@
     rows.forEach(function (r, i) {
       if (ends[r.month]) marks += '<line x1="' + x(i) + '" x2="' + x(i) + '" y1="10" y2="' + (H - 30) + '" class="g-end"/><text x="' + (x(i) - 4) + '" y="22" class="g-lbl" text-anchor="end">지급 종료 ' + r.month + '</text>';
     });
-    if (firstShort) { var fi = L.monthDiff(s.startMonth, firstShort); marks += '<circle cx="' + x(fi) + '" cy="' + y(rows[fi].closing) + '" r="5" class="g-short"/><text x="' + (x(fi) + 8) + '" y="' + (y(rows[fi].closing) + 4) + '" class="g-lbl">첫 부족 ' + firstShort + '</text>'; }
+    if (firstShort) { var fi = L.monthDiff(v.start, firstShort); marks += '<circle cx="' + x(fi) + '" cy="' + y(rows[fi].closing) + '" r="5" class="g-short"/><text x="' + (x(fi) + 8) + '" y="' + (y(rows[fi].closing) + 4) + '" class="g-lbl">첫 부족 ' + firstShort + '</text>'; }
     var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="chart" role="img" aria-label="누적 잔액 그래프 — 아래 표와 같은 내용">' +
       '<line x1="' + pad + '" x2="' + (W - 8) + '" y1="' + y(0) + '" y2="' + y(0) + '" class="g-zero"/>' +
       '<line x1="' + pad + '" x2="' + (W - 8) + '" y1="' + y(s.reserveAmount) + '" y2="' + y(s.reserveAmount) + '" class="g-vault"/>' +
@@ -415,7 +459,10 @@
         return '<tr class="' + (r.month === ui.selMonth ? 'sel ' : '') + (st ? 'st-bad' : '') + (ends[r.month] ? ' st-end' : '') + '" data-row-month="' + r.month + '"><th scope="row"><button type="button" class="linkbtn" data-month-go="' + r.month + '">' + r.month + '</button></th><td>' + L.comma(r.prizeIncome + r.otherIncome) + '</td><td>' + L.comma(r.fixedExpense) + '</td><td>' + L.comma(r.bucketExpense) + '</td><td>' + L.comma(r.surplus) + '</td><td>' + L.comma(r.closing) + '</td><td>' + L.comma(r.available) + '</td><td>' + esc(st) + (ends[r.month] ? (st ? ' · ' : '') + '지급 종료' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       (rows.length > 24 ? '<button type="button" class="btn small" id="btnShowAll">' + (ui.showAll ? '처음 24개월만 보기' : '전체 ' + rows.length + '개월 보기') + '</button>' : '');
-    box.innerHTML = svg + '<p class="small">조회 기간 ' + esc(L.monthLabel(v.start)) + '~' + esc(L.monthLabel(v.end)) + ' (마지막 지급·지출 월 이후 12개월, 한도 600개월). 월을 누르면 위 결과가 그달로 바뀌어요.</p>' + tbl;
+    var sumIn = 0, sumOut = 0; rows.forEach(function (r) { sumIn += r.prizeIncome + r.otherIncome; sumOut += r.fixedExpense + r.bucketExpense; });
+    var minRow = rows.reduce(function (m, r) { return r.closing < m.closing ? r : m; }, rows[0]);
+    box.innerHTML = svg + '<p class="small">보기 기간 ' + esc(L.monthLabel(v.start)) + '~' + esc(L.monthLabel(v.end)) + ' (' + v.months + '개월' + (v.custom ? ', 직접 고른 기간' : ', 기본: 마지막 지급·지출 월 이후 12개월') + '). ' +
+      '이 기간 수입 ' + esc(L.korWon(sumIn)) + ' · 지출 ' + esc(L.korWon(sumOut)) + ' · 가장 낮은 잔액 ' + esc(L.korWon(minRow.closing)) + '(' + esc(L.monthLabel(minRow.month)) + '). 월을 누르면 위 결과가 그달로 바뀌어요.</p>' + tbl;
   }
 
   // ── 공유 이미지 ───────────────────────────────────────────
@@ -483,12 +530,14 @@
     $('bCancel').addEventListener('click', resetBucketForm);
     ['fCat', 'fPri', 'fSort'].forEach(function (id) { $(id).addEventListener('change', function () { renderBuckets(cur(), L.isMonthlyMode(cur())); }); });
 
-    $('fDir').addEventListener('change', function () { $('fStopWrap').hidden = $('fDir').value !== 'in'; });
+    $('fDir').addEventListener('change', syncFlowForm);
     $('fAmount').addEventListener('input', function () { moneyField('fAmount', 'fAmountHelp'); });
     $('flowForm').addEventListener('submit', function (ev) {
       ev.preventDefault();
-      var s = cur(), f = { id: L.uid('f'), direction: $('fDir').value, title: $('fTitle').value.trim(), amount: L.parseKrw($('fAmount').value),
-        startMonth: $('fStart').value, endMonth: $('fEnd').value, stopOnRetirement: $('fDir').value === 'in' && $('fStop').checked };
+      var dir = $('fDir').value, expected = dir === 'expected';
+      var s = cur(), f = { id: L.uid('f'), direction: expected ? 'in' : dir, title: $('fTitle').value.trim() || (expected ? L.EXPECTED_TITLE : ''), amount: L.parseKrw($('fAmount').value),
+        startMonth: $('fStart').value, endMonth: $('fEnd').value, stopOnRetirement: dir === 'in' && $('fStop').checked };
+      if (expected) f.expected = true;
       if (f.amount == null) f.amount = NaN;
       var err = L.validFlow(f);
       if (!L.ok(err)) { setErr('fErr', err[Object.keys(err)[0]]); return; }
@@ -557,6 +606,43 @@
     $('btnPrint').addEventListener('click', function () { window.print(); });
     $('fabBucket').addEventListener('click', function () { $('bucketBox').open = true; $('bucketBox').scrollIntoView({ block: 'start' }); $('bTitle').focus(); });
 
+    // 로또 평균 직접 입력 보조
+    $('eAvgList').addEventListener('input', syncAvgBox);
+    $('eAvgApply').addEventListener('click', function () {
+      if (ui.avgValue == null) return;
+      $('eMode').value = 'gross'; setMoney('eAmount', 'eAmountHelp', ui.avgValue); syncEntryForm(); toast('평균 금액을 1게임당 세전 금액으로 채웠어요.');
+    });
+    // 그래프·표 보기 기간
+    var setRange = function (from, to) { var s = cur(); s.chartFrom = from || ''; s.chartTo = to || ''; ui.showAll = false; changed(); };
+    $('cFrom').addEventListener('change', function () { if (L.isMonth($('cFrom').value)) setRange($('cFrom').value, $('cTo').value); });
+    $('cTo').addEventListener('change', function () { if (L.isMonth($('cTo').value)) setRange($('cFrom').value, $('cTo').value); });
+    $('chartRangeRow').addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-range]'); if (!b) return;
+      var n = +b.dataset.range, from = L.isMonth($('cFrom').value) ? $('cFrom').value : cur().startMonth;
+      if (!n) setRange('', ''); else setRange(from, L.addMonths(from, n - 1));
+    });
+    // 공유 링크
+    $('btnShareLink').addEventListener('click', function () {
+      var base = /^https?:$/.test(location.protocol) ? location.href.split('#')[0] : ONLINE_URL;
+      var url = base + '#' + L.encodeShare(cur(), { cash: shareOn('cash'), memo: shareOn('memo') });
+      $('shareLink').value = url; $('shareLink').hidden = false; $('btnShareCopy').hidden = false;
+      $('shareLinkMsg').textContent = '링크 길이 ' + L.comma(url.length) + '자' + (url.length > 8000 ? ' — 길어서 일부 메신저에서 잘릴 수 있어요. 버킷을 줄이거나 JSON 내보내기를 써 주세요.' : '') +
+        (/^https?:$/.test(location.protocol) ? '' : ' · 파일로 열어서 온라인 주소(' + ONLINE_URL + ')로 만들었어요.');
+      $('shareLink').select();
+    });
+    $('btnShareCopy').addEventListener('click', function () {
+      var v = $('shareLink').value;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(function () { toast('링크를 복사했어요.'); }, function () { $('shareLink').select(); toast('복사가 막혀 있어요. 선택된 링크를 직접 복사해 주세요.'); });
+      else { $('shareLink').select(); toast('선택된 링크를 직접 복사해 주세요.'); }
+    });
+    $('shareInboxAdd').addEventListener('click', function () {
+      var c = ui.shared; if (!c) return;
+      c.id = L.uid('s'); c.title = c.title + ' (공유받음)'; c.createdAt = new Date().toISOString();
+      c.entries.forEach(function (e) { e.id = L.uid('w'); }); c.buckets.forEach(function (b) { b.id = L.uid('k'); }); c.flows.forEach(function (f) { f.id = L.uid('f'); });
+      ui.shared = null; closeInbox(); addScenario(c); toast('공유받은 시나리오를 내 목록에 추가했어요.');
+    });
+    $('shareInboxClose').addEventListener('click', function () { ui.shared = null; closeInbox(); });
+
     // 목록 안 단추들(위임)
     document.addEventListener('click', function (ev) {
       var t = ev.target.closest('button'); if (!t) return;
@@ -591,6 +677,26 @@
       else if (t.id === 'selMonth' && L.isMonth(t.value)) { ui.selMonth = t.value; render(); }
     });
   }
+  function closeInbox() {
+    $('shareInbox').hidden = true;
+    try { history.replaceState(null, '', location.href.split('#')[0]); } catch (e) { /* file:// 등 */ }
+  }
+  // 주소에 #share= 가 있으면 알림 상자를 띄웁니다(자동으로 목록에 넣지 않음)
+  function checkSharedLink() {
+    var r = L.decodeShare(location.hash); if (!r) return;
+    $('shareInbox').hidden = false;
+    if (r.error) { ui.shared = null; $('shareInboxText').textContent = r.error + '. 보낸 분께 링크를 다시 받아 주세요.'; $('shareInboxAdd').hidden = true; return; }
+    ui.shared = r.scenario; $('shareInboxAdd').hidden = false;
+    $('shareInboxText').innerHTML = '<strong>공유받은 시나리오 「' + esc(r.scenario.title) + '」</strong> — 당첨 ' + r.scenario.entries.length + '건 · 버킷 ' + r.scenario.buckets.length + '개. 내 목록에 추가하면 이 브라우저에만 저장되고, 보낸 사람의 계획은 바뀌지 않아요.';
+  }
+  // 로또 1~3등 평균 자료(data/lotto.json). 없거나 못 읽으면 직접 입력으로 돌아갑니다.
+  function loadLotto() {
+    if (!/^https?:$/.test(location.protocol) || !window.fetch) { ui.lottoState = 'file'; syncEntryForm(); return; }
+    fetch('data/lotto.json', { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (o) { ui.lotto = L.lottoAverages(o); ui.lottoState = ui.lotto ? 'ok' : 'empty'; })
+      .catch(function () { ui.lotto = null; ui.lottoState = 'error'; })
+      .then(function () { if (!ui.editEntryId && L.rank($('eProduct').value, $('eRank').value).avg && !$('eAmount').value.trim()) applyRankDefaults(); else syncEntryForm(); });
+  }
   function download(blob, name) {
     var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -599,7 +705,8 @@
   function init() {
     db = Store.read();
     if (!db || !db.scenarios.length) { db = { schemaVersion: L.SCHEMA_VERSION, currentId: null, scenarios: [L.newScenario()] }; db.currentId = db.scenarios[0].id; }
-    fillProducts(); fillBucketSelects(); bind(); fillSettings(); render();
+    fillProducts(); fillBucketSelects(); bind(); fillSettings(); render(); checkSharedLink(); loadLotto();
+    window.addEventListener('hashchange', checkSharedLink);   // 열려 있는 탭에 공유 링크를 붙여 넣은 경우
     var r = Store.write(db);
     $('saveState').textContent = r === true ? '이 브라우저에 자동 저장' : '저장 안 됨 — ' + r;
     if (r !== true) $('saveState').className = 'save-state bad';

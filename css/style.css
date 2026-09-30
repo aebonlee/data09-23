@@ -174,3 +174,15 @@ details.sub { margin: 8px 0; } details.sub > summary { cursor: pointer; font-wei
 @media (max-width: 639px) { .header-inner { align-items: flex-start; }.brand-sub { display: none; }.scenario-bar { width: 100%; }.scenario-bar select { flex-basis: 100%; }.hero-grid { min-height: 0; padding-top: 38px; padding-bottom: 40px; }.hero h1 br { display: none; }.panel { padding: 17px 15px; }.filter-row { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; animation: none !important; } }
 @media print { body { background: #fff; padding: 0; }.site-header .scenario-bar, .hero, .service-guide, .form-box, #flowForm, .fab, .toast, #secShare, .btn, .filter-row, .preset-row { display: none !important; }.site-header { position: static; }.layout { display: block; }.panel { break-inside: avoid; border-color: #999; margin-bottom: 10px; box-shadow: none; }.table-wrap { overflow: visible; } }
+
+/* 2026-09-30 수강생 답 반영 — 평균 직접 입력·그래프 기간·공유 링크 (디자인 레이어는 그대로 두고 덧붙임) */
+textarea { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 10px; background: #fff; resize: vertical; word-break: keep-all; overflow-wrap: break-word; }
+textarea:focus-visible { outline: 3px solid rgba(91,61,245,.25); outline-offset: 2px; border-color: var(--primary); }
+.hint.bad { color: var(--neg); font-weight: 700; }
+.range-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: end; margin-bottom: 10px; }
+.range-row[hidden] { display: none; }
+.range-row .range-quick { grid-column: 1 / -1; margin-top: 0; }
+.share-link { width: 100%; min-width: 0; margin-top: 8px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: .8rem; }
+.share-inbox { border: 1px solid #cfc7ff; background: var(--primary-soft); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; }
+.share-inbox p { margin: 0 0 4px; }
+@media print { .range-row, .share-inbox { display: none !important; } }

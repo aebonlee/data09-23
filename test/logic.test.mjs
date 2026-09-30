@@ -346,4 +346,95 @@ test('JSON 으로 저장했다 불러와도 계산 결과가 같다 (AC14)', () 
   assert.deepEqual(L.simulate(back).rows.slice(0, 12), L.simulate(s).rows.slice(0, 12));
 });
 
+console.log('\n2026-09-30 수강생 답 반영');
+const draw = (round, p1, p2, p3, w1 = 10) => ({ round, date: '', ranks: { '1': { perGame: p1, winners: w1 }, '2': { perGame: p2, winners: 60 }, '3': { perGame: p3, winners: 2500 } } });
+test('로또 자료 — 최근 52회차만, 회차 순서가 섞여 있어도 끝 52개를 고른다', () => {
+  const draws = Array.from({ length: 60 }, (_, i) => draw(1000 + i, (i + 1) * 100000000, 50000000, 1500000));
+  draws.reverse();
+  const a = L.lottoAverages({ schema: 'lotto-draws@1', updatedAt: '2026-09-30', draws });
+  assert.equal(a.from, 1008); assert.equal(a.to, 1059); assert.equal(a.draws, 52);
+  // 9억~60억 평균 = (9+60)/2 억 = 34.5억
+  assert.deepEqual(a.ranks['1'], { mean: 3450000000, n: 52 });
+  assert.deepEqual(a.ranks['2'], { mean: 50000000, n: 52 });
+});
+test('로또 자료 — 당첨자 0명·금액 0인 회차는 평균에서 뺀다, 반올림은 원 단위', () => {
+  const a = L.lottoAverages({ schema: 'lotto-draws@1', draws: [draw(1, 2000000001, 1, 1), draw(2, 0, 2, 2, 0), draw(3, 2000000000, 2, 2), draw(4, 3000000000, 2, 2, 0)] });
+  assert.deepEqual(a.ranks['1'], { mean: 2000000001, n: 2 });   // 4000000001/2 = 2000000000.5 → 반올림
+  assert.deepEqual(a.ranks['2'], { mean: 2, n: 4 });            // 7/4 = 1.75 → 2
+});
+test('로또 자료 — 빈 draws·형식 오류는 null(직접 입력으로 돌아감), 저장소의 data/lotto.json 도 형식은 맞다', () => {
+  assert.equal(L.lottoAverages({ schema: 'lotto-draws@1', draws: [] }), null);
+  assert.equal(L.lottoAverages({ schema: 'x', draws: [draw(1, 1, 1, 1)] }), null);
+  assert.ok(L.checkLottoData({ schema: 'lotto-draws@1', draws: [draw(1, 1, 1, 1), draw(1, 1, 1, 1)] }).some((m) => /두 번/.test(m)));
+  assert.ok(L.checkLottoData({ schema: 'lotto-draws@1', draws: [draw(1, -5, 1, 1)] }).length > 0);
+  const repo = require('../data/lotto.json');
+  assert.deepEqual(L.checkLottoData(repo), []);
+});
+test('평균 직접 입력 — 한글 단위·쉼표 숫자·줄바꿈을 읽고 못 읽은 칸은 따로 알린다', () => {
+  const r = L.parseAmountList('25억 3천만, 18억\n2,145,678,900\n뭐지');
+  assert.deepEqual(r.values, [2530000000, 1800000000, 2145678900]);
+  assert.deepEqual(r.bad, ['뭐지']);
+  assert.equal(L.lottoAverage(r.values).mean, Math.round((2530000000 + 1800000000 + 2145678900) / 3));
+});
+test('안전금고 한도(확정) — 월별 = 현재 잔고 + 시작 월 수령액 + 추가 예상 수입(기간 합계)', () => {
+  const s = X.pension();
+  const base = L.reserveLimit(s);
+  assert.equal(base, 10000000 + 5460000);
+  s.flows.push({ id: 'x1', direction: 'in', expected: true, title: L.EXPECTED_TITLE, amount: 1000000, startMonth: '2026-11', endMonth: '2027-04', stopOnRetirement: false });
+  assert.equal(L.expectedIncomeTotal(s), 6000000);
+  assert.equal(L.reserveLimit(s), base + 6000000);
+  const p = L.reserveLimitParts(s);
+  assert.equal(p.cash + p.firstMonthPrize + p.expected, p.total);
+});
+test('추가 예상 수입 — 시작 월 전 몫은 빼고, 그 기간 월별 예산에 수입으로 들어간다', () => {
+  const s = X.pension();   // 시작 2026-10
+  const before = L.simulate(s);
+  s.flows.push({ id: 'x2', direction: 'in', expected: true, title: '부업', amount: 500000, startMonth: '2026-08', endMonth: '2026-11', stopOnRetirement: false });
+  assert.equal(L.expectedIncomeTotal(s), 1000000);            // 10·11월 두 달만
+  const after = L.simulate(s);
+  assert.equal(rowOf(after, '2026-10').otherIncome - rowOf(before, '2026-10').otherIncome, 500000);
+  assert.equal(rowOf(after, '2026-12').otherIncome, rowOf(before, '2026-12').otherIncome);
+});
+test('추가 예상 수입 — 종료 월이 없으면 입력 오류, 일시금 시나리오도 월별로 바꿔 기간 예산에 넣는다', () => {
+  const bad = { id: 'x3', direction: 'in', expected: true, title: L.EXPECTED_TITLE, amount: 1, startMonth: '2026-10', endMonth: '' };
+  assert.ok(L.validFlow(bad).endMonth);
+  const s = X.lump();
+  assert.equal(L.isMonthlyMode(s), false);
+  s.flows.push(Object.assign({}, bad, { endMonth: '2026-12' }));
+  assert.equal(L.isMonthlyMode(s), true);
+  assert.deepEqual(L.checkScenario(s), []);
+});
+test('그래프 기간 — 비우면 기본 조회 범위, 뒤집히면 바로잡고, 계산 범위 밖은 잘라낸다', () => {
+  const s = X.pension(), v = L.viewRange(s);
+  const d = L.chartRange(s, '', '');
+  assert.equal(d.start, v.start); assert.equal(d.end, v.end); assert.equal(d.custom, false);
+  const r = L.chartRange(s, '2028-12', '2027-01');
+  assert.equal(r.start, '2027-01'); assert.equal(r.end, '2028-12'); assert.equal(r.months, 24); assert.equal(r.from, 3);
+  const c = L.chartRange(s, '2020-01', '2200-01');
+  assert.equal(c.start, s.startMonth); assert.equal(c.months, L.LIMIT_MONTHS);
+});
+test('공유 링크 — 되살리면 계산 결과가 같고, 잔고·메모·별칭은 고르지 않으면 담지 않는다', () => {
+  const s = X.lump();
+  s.currentCash = 20000000; s.buckets[0].note = '비밀 메모'; s.entries[0].alias = '지갑 속 한 장'; s.entries[0].round = '1190';
+  const hash = '#' + L.encodeShare(s, { cash: false, memo: false });
+  const got = L.decodeShare(hash).scenario;
+  assert.equal(got.currentCash, 0); assert.equal(got.reserveAmount, 0);
+  assert.equal(got.buckets[0].note, ''); assert.equal(got.entries[0].alias, ''); assert.equal(got.entries[0].round, '');
+  assert.equal(s.currentCash, 20000000);                        // 원본은 그대로
+  const full = L.decodeShare('#' + L.encodeShare(s, { cash: true, memo: true })).scenario;
+  assert.equal(full.buckets[0].note, '비밀 메모');
+  assert.deepEqual(L.lumpSummary(full), L.lumpSummary(Object.assign(L.clone(s), { entries: full.entries })));
+  assert.equal(full.title, s.title);                            // 한글 제목이 깨지지 않음
+});
+test('공유 링크 — 공유 링크가 아니면 null, 손상·다른 앱·형식 오류는 error', () => {
+  assert.equal(L.decodeShare(''), null);
+  assert.equal(L.decodeShare('#secWins'), null);
+  assert.equal(L.decodeShare('#share=%%%'), null);             // 형식이 다른 조각은 공유 링크로 보지 않음
+  assert.ok(L.decodeShare('#share=abc').error);
+  const other = Buffer.from(JSON.stringify({ app: 'x', v: 1, scenario: {} })).toString('base64url');
+  assert.ok(/아니에요/.test(L.decodeShare('#share=' + other).error));
+  const broken = Buffer.from(JSON.stringify({ app: 'data09-23', v: 1, scenario: { title: '' } })).toString('base64url');
+  assert.ok(/읽지 못했어요/.test(L.decodeShare('#share=' + broken).error));
+});
+
 console.log(`\n${passed}개 통과${process.exitCode ? ' — 실패 있음' : ''}`);

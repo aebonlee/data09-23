@@ -133,6 +133,14 @@ create table if not exists public.cashflow (
 );
 create index if not exists cashflow_scenario_idx on public.cashflow (owner_id, scenario_id);
 
+-- 2026-09-30 추가 예상 수입(수강생 답) — 기간이 정해진 수입. 안전금고 한도(월별 = 현재 잔고
+-- + 시작 월 수령액 + 추가 예상 수입)에 들어가므로 수입이어야 하고 종료 월이 꼭 있어야 한다.
+-- 기존 설치에도 다시 돌릴 수 있게 add column if not exists + 제약은 지우고 다시 만든다.
+alter table public.cashflow add column if not exists expected boolean not null default false;
+alter table public.cashflow drop constraint if exists cashflow_expected;
+alter table public.cashflow add constraint cashflow_expected
+  check (not expected or (direction = 'in' and end_month is not null));
+
 -- ----------------------------------------------------------------------------
 -- 2. 함수 · 트리거
 --
